@@ -134,6 +134,8 @@ Then set `CHATBOT_API_URL` in the Flutter app's `.env` to the deployed URL.
 ## Development
 
 - Lint and format: `ruff check . && ruff format .`
-- Tests: `pytest`
+- Tests: `pip install -r requirements-dev.txt`, then `pytest`
+- Health probes for the host: `GET /health/live` (process up) and `GET /health/ready` (model loaded).
+- Set `ENVIRONMENT=production` on the host to turn off `/docs` and `/openapi.json`.
 - Review against the FastAPI checklist: run `/fast-review` in Claude Code from this directory.
 - Keep `.env` out of git. List every variable in `.env.example`.
