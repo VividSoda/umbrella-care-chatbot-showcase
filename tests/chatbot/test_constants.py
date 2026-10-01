@@ -9,7 +9,7 @@ from src.chatbot.constants import (
     specialization_for,
 )
 
-TRAINING_CSV = Path(__file__).parent.parent / "ml" / "data" / "Training.csv"
+TRAINING_CSV = Path(__file__).parents[2] / "ml" / "data" / "Training.csv"
 
 # Category names from the Flutter app's doctor_filter_categories.dart.
 APP_CATEGORIES = {
