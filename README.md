@@ -58,7 +58,11 @@ cp .env.example .env
 
 ## Train the model
 
-1. Download the "Disease Symptom Prediction" dataset from Kaggle into `ml/data/`.
+1. Download `Training.csv` and `Testing.csv` from the Kaggle dataset
+   [Disease Prediction Using Machine Learning](https://www.kaggle.com/datasets/kaushil268/disease-prediction-using-machine-learning)
+   (132 symptom columns plus `prognosis`, 41 diseases) and place them in `ml/data/`.
+   The CSVs are git-ignored, so each developer downloads them. Check the dataset's license
+   on its Kaggle page. The data is synthetic, so predictions are a demo, not medical advice.
 2. Run the training script:
 
 ```bash
