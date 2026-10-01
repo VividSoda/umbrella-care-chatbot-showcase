@@ -24,6 +24,8 @@ class Predictor:
         self._model = model
         self._symptoms = symptoms
         self._known = frozenset(symptoms)
+        # Dataset labels have stray whitespace ("Diabetes ", double spaces).
+        self._labels = [" ".join(str(c).split()) for c in model.classes_]
 
     @classmethod
     def load(cls, path: Path) -> "Predictor":
@@ -55,7 +57,19 @@ class Predictor:
 
         probabilities = self._model.predict_proba(row)[0]
         best = np.argsort(probabilities)[::-1][:top_n]
-        return [
-            Prediction(str(self._model.classes_[i]), float(probabilities[i]))
-            for i in best
+        return [Prediction(self._labels[i], float(probabilities[i])) for i in best]
+
+    def typical_symptoms(
+        self, disease: str, exclude: Collection[str] = (), n: int = 3
+    ) -> list[str]:
+        """Symptoms most associated with `disease` that are not in `exclude`.
+
+        Reads P(symptom | disease) from the Naive Bayes model, so it is tied to
+        BernoulliNB. Used to suggest what to ask the user next.
+        """
+        log_probs = self._model.feature_log_prob_[self._labels.index(disease)]
+        skipped = set(exclude)
+        ranked = np.argsort(log_probs)[::-1]
+        return [self._symptoms[i] for i in ranked if self._symptoms[i] not in skipped][
+            :n
         ]

@@ -94,22 +94,28 @@ CHATBOT_API_URL=http://<your-lan-ip>:8000/api/v1/chatbot/
 Request:
 
 ```json
-{ "message": "I have a headache and feel sick", "symptoms": ["fever"] }
+{ "message": "I have a headache and feel sick", "symptoms": ["mild_fever"] }
 ```
 
-`symptoms` holds the symptoms collected earlier in the conversation, since the server keeps no history.
+- `message` is required, 1–500 characters.
+- `symptoms` is optional. Send back the `symptoms` array from the previous response unchanged, since the server keeps no history. These are model symptom names such as `mild_fever`, not free text. Names the model does not know are ignored.
 
 Response:
 
 ```json
 {
-  "message": "Based on your symptoms this could be Migraine. This is not a diagnosis, please consult a doctor.",
-  "suggested": ["Are you sensitive to light?"],
-  "specialization": "Neurologist"
+  "message": "Based on your symptoms this could be Migraine. Other possibilities: Hypertension or Vertigo. This is not a diagnosis, please consult a doctor.",
+  "suggested": ["dizziness", "nausea", "vomiting"],
+  "specialization": "Neurologist",
+  "symptoms": ["mild_fever", "headache", "nausea"]
 }
 ```
 
-If fewer than the minimum number of symptoms are recognized, the server asks a follow-up question instead of predicting.
+- `suggested` are quick-reply chips: symptoms common in the predicted disease that the user has not mentioned. Sending a chip back as the next `message` is understood as-is.
+- `specialization` is one of the Flutter app's doctor categories, or `null` while there is not enough to go on.
+- `symptoms` is everything recognized so far. Store it and send it with the next request.
+
+If fewer than the minimum number of symptoms are recognized, or the best guess is below the confidence threshold, `specialization` is `null` and the message asks for more detail.
 
 ## Deploy
 
