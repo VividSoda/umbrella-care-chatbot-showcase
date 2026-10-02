@@ -71,3 +71,28 @@ def test_no_symptoms_returns_empty(text):
 def test_every_synonym_key_is_a_real_model_symptom():
     symptoms = set(joblib.load(MODEL_PATH)["symptoms"])
     assert set(SYNONYMS) <= symptoms
+
+
+def test_mentions_any_finds_a_phrase_anywhere_in_the_text():
+    from src.chatbot.symptoms import mentions_any
+
+    assert mentions_any("I think my hand is Fractured!", ["fractured"])
+    assert mentions_any("she had a cardiac arrest", ["cardiac arrest"])
+    assert not mentions_any("I have a cough", ["fractured", "cardiac arrest"])
+
+
+def test_mentions_any_ignores_negated_mentions():
+    from src.chatbot.symptoms import mentions_any
+
+    assert not mentions_any("no fracture", ["fracture"])
+    assert not mentions_any("I did not have a seizure", ["seizure"])
+    assert mentions_any("no cough but a seizure", ["seizure"])
+
+
+def test_punctuation_ends_a_negation():
+    assert extract_symptoms("no fever, headache", KNOWN) == ["headache"]
+    assert extract_symptoms("I have no cough. I do have a headache", KNOWN) == [
+        "headache"
+    ]
+    # Without punctuation the negation still applies to what follows closely.
+    assert extract_symptoms("no fever headache", KNOWN) == []

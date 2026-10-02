@@ -1,18 +1,36 @@
 """Extract symptoms, predict, build the reply."""
 
 from src.chatbot.constants import (
+    EMERGENCY_PHRASES,
+    INJURY_PHRASES,
+    INJURY_SPECIALIZATION,
     MIN_CONFIDENCE,
     MIN_SYMPTOMS,
     specialization_for,
 )
 from src.chatbot.predictor import Predictor
 from src.chatbot.schemas import ChatRequest, ChatResponse
-from src.chatbot.symptoms import extract_symptoms
+from src.chatbot.symptoms import extract_symptoms, mentions_any
 
 DISCLAIMER = "This is not a diagnosis, please consult a doctor."
 ASK_MORE = "Can you tell me more? Are you having any other symptoms?"
 ASK_MORE_UNSURE = (
     "I can't tell yet what this might be. Can you describe any other symptoms you have?"
+)
+NOT_RECOGNIZED = (
+    "I couldn't pick out a symptom in that. Try describing how you feel, "
+    "for example a headache, fever or cough. If this is a different problem, "
+    "start a new chat."
+)
+ALREADY_NOTED = "I already have that noted. Is there anything else you are feeling?"
+EMERGENCY = (
+    "This could be an emergency. Call your local emergency number or go to the "
+    "nearest emergency room right away; do not wait for a chat reply."
+)
+INJURY = (
+    "I can't assess injuries like this, but an orthopedic doctor can help. If it "
+    f"is very painful, the limb looks out of place, or there is heavy bleeding, "
+    f"go to an emergency room right away. {DISCLAIMER}"
 )
 STARTER_SUGGESTIONS = ["headache", "fever", "cough", "stomach pain"]
 SUGGESTION_COUNT = 3
@@ -28,12 +46,56 @@ def _merge(previous: list[str], found: list[str]) -> list[str]:
     return list(dict.fromkeys([*previous, *found]))
 
 
+def _follow_ups(predictor: Predictor, symptoms: list[str]) -> list[str]:
+    """Chips to offer when there is nothing new to predict from."""
+    if len(symptoms) < MIN_SYMPTOMS:
+        return [s for s in STARTER_SUGGESTIONS if s not in set(symptoms)]
+    top = predictor.predict(symptoms, top_n=1)[0]
+    return [
+        _label(s)
+        for s in predictor.typical_symptoms(top.disease, symptoms, SUGGESTION_COUNT)
+    ]
+
+
 def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
     known = set(predictor.symptoms)
     # The client's state isn't trusted: drop names the model doesn't know
     # (e.g. after a retrain) instead of failing the whole request.
     previous = [s for s in request.symptoms if s in known]
+
+    # Checked first, on the message alone: the earlier symptoms must never
+    # decide what is said about a new emergency or injury.
+    if mentions_any(request.message, EMERGENCY_PHRASES):
+        return ChatResponse(
+            message=EMERGENCY, suggested=[], specialization=None, symptoms=previous
+        )
+    if mentions_any(request.message, INJURY_PHRASES):
+        return ChatResponse(
+            message=INJURY,
+            suggested=[],
+            specialization=INJURY_SPECIALIZATION,
+            symptoms=previous,
+        )
+
     found = extract_symptoms(request.message, predictor.symptoms)
+
+    # Nothing new in this message: say so instead of repeating the old
+    # prediction as if it answered what was just said.
+    if not found:
+        return ChatResponse(
+            message=NOT_RECOGNIZED,
+            suggested=_follow_ups(predictor, previous),
+            specialization=None,
+            symptoms=previous,
+        )
+    if previous and set(found) <= set(previous):
+        return ChatResponse(
+            message=ALREADY_NOTED,
+            suggested=_follow_ups(predictor, previous),
+            specialization=None,
+            symptoms=previous,
+        )
+
     symptoms = _merge(previous, found)
 
     if len(symptoms) < MIN_SYMPTOMS:
