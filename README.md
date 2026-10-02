@@ -222,3 +222,7 @@ If the first deploy fails with "Permission denied to use service", grant the acc
 - Set `ENVIRONMENT=production` on the host to turn off `/docs` and `/openapi.json`.
 - Review against the FastAPI checklist: run `/fast-review` in Claude Code from this directory.
 - Keep `.env` out of git. List every variable in `.env.example`.
+
+## Roadmap
+
+Planned improvements, in the order to tackle them, are in [`docs/roadmap.md`](docs/roadmap.md).
