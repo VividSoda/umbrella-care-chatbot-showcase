@@ -119,17 +119,58 @@ If fewer than the minimum number of symptoms are recognized, or the best guess i
 
 ## Deploy
 
-The server needs only the code and `artifacts/model.joblib`. Any host that runs a Python web service works (Render, Google Cloud Run, Hugging Face Spaces).
+The server needs only `src/` and `artifacts/model.joblib`. The `Dockerfile` packages exactly that, so any container host works. These steps use Google Cloud Run.
 
-Start command:
+### Test the image locally
 
 ```bash
-uvicorn src.main:app --host 0.0.0.0 --port $PORT
+docker build --platform linux/amd64 -t umbrella-chatbot .
+docker run --rm -e PORT=8080 -p 8080:8080 umbrella-chatbot
+curl localhost:8080/health/ready
 ```
 
-Set the host's Python version to match your local one. Free tiers may sleep when idle, so the first request after a pause can take up to a minute. Set a generous timeout in the app's HTTP client. Check each host's current free-tier limits before relying on it.
+### Deploy to Cloud Run
 
-Then set `CHATBOT_API_URL` in the Flutter app's `.env` to the deployed URL.
+One-time setup:
+
+1. In the [Cloud console](https://console.cloud.google.com), create a project and attach a billing account. Cloud Run needs one even for the free tier. Add a budget alert (Billing → Budgets) so a surprise never costs more than you expect.
+2. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), then:
+
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+```
+
+Deploy (and redeploy after any change) from this directory:
+
+```bash
+gcloud run deploy umbrella-care-chatbot \
+  --source . \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --cpu-boost \
+  --min-instances 0 \
+  --max-instances 2 \
+  --timeout 30 \
+  --set-env-vars ENVIRONMENT=production
+```
+
+The command prints a `Service URL`. Put it in the Flutter app's `.env`, keeping the path and trailing slash:
+
+```
+CHATBOT_API_URL=https://umbrella-care-chatbot-xxxxx-el.a.run.app/api/v1/chatbot/
+```
+
+Notes:
+
+- `--min-instances 0` scales to zero when idle, which keeps it inside the free tier. The first request after a pause waits for a cold start (a few seconds; the model is tiny). `--min-instances 1` removes that wait but is billed continuously, so it is not free.
+- `--max-instances 2` caps cost and abuse, since the endpoint is public.
+- Region: `asia-south1` (Mumbai) is the closest region to Nepal. It is on Tier 2 pricing, which only matters beyond the monthly free allowance; the free allowance is reported to apply there too, so confirm the current numbers on the [pricing page](https://cloud.google.com/run/pricing). `us-central1` is a Tier 1 alternative with higher latency. A service cannot change region: deploy a new one instead.
+- `ENVIRONMENT=production` hides `/docs`. Add `ALLOWED_ORIGINS` (comma-separated) only if you serve Flutter web.
+- Keep the app's HTTP timeout generous anyway (the app uses 60 s).
+- After retraining, commit the new `artifacts/model.joblib` and redeploy. scikit-learn must stay pinned to the version that trained it.
 
 ## Development
 
