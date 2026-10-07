@@ -77,14 +77,15 @@ def main():
                 totals[c] += np.array(run_patient(sim, X[i], y[i], c, rng))
             patients += 1
 
-    print(f"{patients} patients, {FOLDS}-fold CV")
-    print("q " + " ".join(f"{c:>22}" for c in CONFIGS))
-    for q in range(MAX_Q + 1):
-        row = " ".join(
-            f"top1 {totals[c][q, 0] / patients:.2f} top3 {totals[c][q, 1] / patients:.2f}"
-            for c in CONFIGS
-        )
-        print(f"{q:<3} {row}")
+    print(f"patients: {patients}, {FOLDS}-fold CV\n")
+    header = "questions asked:  " + "".join(f"{q:>6}" for q in range(MAX_Q + 1))
+    for name, col in (("top-1 accuracy", 0), ("top-3 accuracy", 1)):
+        print(name)
+        print(header)
+        for c in CONFIGS:
+            row = totals[c][:, col] / patients
+            print(f"  {c:<15}" + "".join(f"{v:>6.0%}" for v in row))
+        print()
 
 
 if __name__ == "__main__":
