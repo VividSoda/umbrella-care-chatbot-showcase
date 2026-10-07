@@ -1,12 +1,10 @@
 """Compare follow-up question strategies by simulating patients."""
 
-import joblib
 import numpy as np
 from simulator import Sim
 from sklearn.model_selection import StratifiedKFold
 from sklearn.naive_bayes import BernoulliNB
 from train import (  # reuse the cleaning train.py already does
-    MODEL_PATH,
     TARGET,
     load_data,
 )
@@ -16,8 +14,6 @@ MAX_Q = 8  # follow-up questions to simulate
 FOLDS = 3
 CONFIGS = ["current", "partial", "partial+IG"]
 
-model = joblib.load(MODEL_PATH)
-sim = Sim(model)
 
 rng = np.random.default_rng(seed=42)  # for reproducibility
 
@@ -29,12 +25,6 @@ def load():
     )  # convert to numpy 2D array and force every value to be 0 or 1
     y = df[TARGET].str.strip().to_numpy()  # the true disease of each patient
     return X, y
-
-
-def entropy(p):
-    """How uncertain a probability distribution is (0 means certain)."""
-    s = np.clip(p, 1e-12, 1)
-    return -(p * np.log(p)).sum(axis=1)
 
 
 def run_patient(sim, symptoms, truth, config, rng):
@@ -80,3 +70,22 @@ def main():
         for i in test_idx:
             if X[i].sum() < START:
                 continue  # skip patients who don't have enough symptoms to start with
+
+            for c in CONFIGS:
+                # same seed per patient -> every config gets the same first symptoms
+                rng = np.random.default_rng(i)
+                totals[c] += np.array(run_patient(sim, X[i], y[i], c, rng))
+            patients += 1
+
+    print(f"{patients} patients, {FOLDS}-fold CV")
+    print("q " + " ".join(f"{c:>22}" for c in CONFIGS))
+    for q in range(MAX_Q + 1):
+        row = " ".join(
+            f"top1 {totals[c][q, 0] / patients:.2f} top3 {totals[c][q, 1] / patients:.2f}"
+            for c in CONFIGS
+        )
+        print(f"{q:<3} {row}")
+
+
+if __name__ == "__main__":
+    main()

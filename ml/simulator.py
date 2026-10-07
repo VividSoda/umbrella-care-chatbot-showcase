@@ -1,6 +1,5 @@
 import numpy as np
-from train import entropy
-from utils import softmax
+from utils import entropy, softmax
 
 
 class Sim:
@@ -34,7 +33,7 @@ class Sim:
         where each number is P(disease | symptoms), and the whole array sums to 1.
         For example, if yes = {itching, skin_rash}, you might get back something like:
         """
-        x = np.zeros(self.p1.shape[1])
+        x = np.zeros(self.probability_of_symptoms_given_diseases.shape[1])
         x[list(indices_of_confirmed_present_symptoms)] = 1
         scores = self.log_prob_of_diseases + (
             x * self.log_prob_of_symptoms_given_diseases
@@ -90,7 +89,7 @@ class Sim:
         # column j is now "the posterior over diseases IF the patient says yes to symptom j"
 
         # same bug again: "answer is no" should use (1 - self.p1), not (1 - log-probability)
-        after_no = posterior_probability[:, None] * (
+        after_no = posterior_probability[:, None] * np.exp(
             1 - self.log_prob_of_symptoms_given_diseases
         )  # shape (41, 132): mirror of after_yes, for "the answer is no"
         after_no /= after_no.sum(
