@@ -1,6 +1,6 @@
 import numpy as np
-from scipy.special import softmax
 from train import entropy
+from utils import softmax
 
 
 class Sim:
