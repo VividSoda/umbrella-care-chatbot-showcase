@@ -45,6 +45,32 @@ def test_typical_symptoms_skip_the_ones_already_given(predictor):
     assert len(suggestions) == 2
 
 
+def test_next_symptoms_never_repeats_a_given_symptom(predictor):
+    suggestions = predictor.next_symptoms(["itching", "cough"], n=4)
+    assert "itching" not in suggestions
+    assert "cough" not in suggestions
+    assert len(suggestions) == 2  # only two unasked symptoms exist
+
+
+def test_next_symptoms_respects_n(predictor):
+    assert len(predictor.next_symptoms(["itching"], n=2)) == 2
+
+
+def test_next_symptoms_works_with_no_symptoms_yet(predictor):
+    assert len(predictor.next_symptoms([], n=2)) == 2
+
+
+def test_next_symptoms_unknown_symptom_raises(predictor):
+    with pytest.raises(ValueError, match="made_up"):
+        predictor.next_symptoms(["made_up"])
+
+
+def test_next_symptoms_separates_the_candidates(predictor):
+    # "itching" alone leans Acne; a breathing symptom would split Acne from
+    # Asthma better than another skin symptom that Acne already explains.
+    assert predictor.next_symptoms(["itching"], n=1)[0] in {"cough", "breathlessness"}
+
+
 @pytest.mark.skipif(not MODEL_PATH.exists(), reason="model.joblib not trained")
 def test_real_model_returns_ranked_top_three():
     real = Predictor.load(MODEL_PATH)

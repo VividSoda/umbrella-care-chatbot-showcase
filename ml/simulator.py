@@ -90,7 +90,7 @@ class Sim:
 
         # same bug again: "answer is no" should use (1 - self.p1), not (1 - log-probability)
         after_no = posterior_probability[:, None] * np.exp(
-            1 - self.log_prob_of_symptoms_given_diseases
+            1 - self.log_prob_of_symptoms_absent_given_diseases
         )  # shape (41, 132): mirror of after_yes, for "the answer is no"
         after_no /= after_no.sum(
             axis=0, keepdims=True
