@@ -1,4 +1,10 @@
+from typing import ClassVar
+
+import pytest
+
+from src.chatbot import constants as service_constants
 from src.chatbot import service
+from src.chatbot.constants import EMERGENCY_PHRASES, Urgency
 from src.chatbot.schemas import ChatRequest
 from src.chatbot.service import DISCLAIMER, build_reply
 
@@ -131,3 +137,72 @@ def test_no_question_is_asked_when_none_would_help(predictor, monkeypatch):
     monkeypatch.setattr(service, "STOP_CONFIDENCE", 1.1)
     monkeypatch.setattr(service, "MIN_QUESTION_GAIN", 10.0)
     assert reply(predictor, "itching and a rash").suggested == []
+
+
+class _NoModel:
+    """Stands in for the predictor and fails if anything asks it to predict."""
+
+    symptoms: ClassVar[list[str]] = ["itching", "skin_rash"]
+
+    def predict(self, *args, **kwargs):
+        raise AssertionError("the model must not run for an emergency")
+
+    next_symptoms = typical_symptoms = predict
+
+
+@pytest.mark.parametrize("phrase", EMERGENCY_PHRASES)
+def test_every_emergency_phrase_bypasses_the_model(phrase):
+    result = reply(_NoModel(), f"I think {phrase}", symptoms=["itching", "skin_rash"])
+    assert result.message == service.EMERGENCY
+    assert result.urgency == Urgency.EMERGENCY
+    assert result.suggested == []
+    assert result.specialization is None
+
+
+def test_injury_is_see_a_doctor_soon(predictor):
+    result = reply(predictor, "I have a fractured hand")
+    assert result.urgency == Urgency.SEE_DOCTOR_SOON
+
+
+def test_mild_prediction_is_self_care_with_matching_advice(predictor):
+    result = reply(predictor, "itching and a rash")  # Acne: mild
+    assert result.urgency == Urgency.SELF_CARE
+    assert service.URGENCY_ADVICE[Urgency.SELF_CARE] in result.message
+    assert result.message.endswith(DISCLAIMER)
+
+
+def test_severity_raises_the_prediction_urgency(predictor):
+    result = build_reply(
+        ChatRequest(message="itching and a rash", severity=9), predictor
+    )
+    assert result.urgency == Urgency.SEE_DOCTOR_SOON
+    assert service.URGENCY_ADVICE[Urgency.SEE_DOCTOR_SOON] in result.message
+
+
+def test_disease_floor_can_make_the_prediction_an_emergency(predictor, monkeypatch):
+    monkeypatch.setattr(
+        service_constants, "_NORMALIZED_URGENCY", {"Acne": Urgency.EMERGENCY}
+    )
+    result = reply(predictor, "itching and a rash")
+    assert result.urgency == Urgency.EMERGENCY
+    assert service.URGENCY_ADVICE[Urgency.EMERGENCY] in result.message
+
+
+def test_red_flag_is_not_lost_when_there_are_too_few_symptoms(predictor):
+    result = reply(predictor, "I have a cough and chest pain")
+    assert result.specialization is None  # too few symptoms to predict
+    assert result.urgency == Urgency.SEE_DOCTOR_SOON
+
+
+def test_unsure_prediction_ignores_the_disease_floor(predictor, monkeypatch):
+    monkeypatch.setattr(service, "MIN_CONFIDENCE", 0.999)
+    monkeypatch.setattr(
+        service_constants, "_NORMALIZED_URGENCY", {"Acne": Urgency.EMERGENCY}
+    )
+    result = reply(predictor, "itching and a rash")
+    assert result.message == service.ASK_MORE_UNSURE
+    assert result.urgency == Urgency.SELF_CARE
+
+
+def test_not_recognized_reply_reports_self_care(predictor):
+    assert reply(predictor, "hello").urgency == Urgency.SELF_CARE

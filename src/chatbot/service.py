@@ -8,11 +8,13 @@ from src.chatbot.constants import (
     MIN_QUESTION_GAIN,
     MIN_SYMPTOMS,
     STOP_CONFIDENCE,
+    Urgency,
     specialization_for,
 )
 from src.chatbot.predictor import Predictor
 from src.chatbot.schemas import ChatRequest, ChatResponse
 from src.chatbot.symptoms import extract_symptoms, mentions_any
+from src.chatbot.triage import assess
 
 DISCLAIMER = "This is not a diagnosis, please consult a doctor."
 ASK_MORE = "Can you tell me more? Are you having any other symptoms?"
@@ -34,6 +36,11 @@ INJURY = (
     f"is very painful, the limb looks out of place, or there is heavy bleeding, "
     f"go to an emergency room right away. {DISCLAIMER}"
 )
+URGENCY_ADVICE = {
+    Urgency.SELF_CARE: "This can often be managed at home, but see a doctor if it gets worse.",
+    Urgency.SEE_DOCTOR_SOON: "Please see a doctor soon.",
+    Urgency.EMERGENCY: "This could be serious. Get emergency care right away.",
+}
 STARTER_SUGGESTIONS = ["headache", "fever", "cough", "stomach pain"]
 SUGGESTION_COUNT = 3
 
@@ -41,6 +48,20 @@ SUGGESTION_COUNT = 3
 def _label(symptom: str) -> str:
     """Readable chip text. It re-extracts to the same symptom when sent back."""
     return symptom.replace("_", " ")
+
+
+def _urgency(request: ChatRequest, disease: str | None = None) -> Urgency:
+    """Triage from the message and the profile. Pass `disease` only for a
+    prediction that is trusted enough to show; otherwise its floor is skipped."""
+    return assess(
+        request.message,
+        disease,
+        duration_days=request.duration_days,
+        severity=request.severity,
+        age=request.age,
+        pregnant=request.pregnant,
+        chronic_conditions=request.chronic_conditions,
+    )
 
 
 def _merge(previous: list[str], found: list[str]) -> list[str]:
@@ -81,7 +102,11 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
     # decide what is said about a new emergency or injury.
     if mentions_any(request.message, EMERGENCY_PHRASES):
         return ChatResponse(
-            message=EMERGENCY, suggested=[], specialization=None, symptoms=previous
+            message=EMERGENCY,
+            suggested=[],
+            specialization=None,
+            symptoms=previous,
+            urgency=Urgency.EMERGENCY,
         )
     if mentions_any(request.message, INJURY_PHRASES):
         return ChatResponse(
@@ -89,6 +114,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=[],
             specialization=INJURY_SPECIALIZATION,
             symptoms=previous,
+            urgency=Urgency.SEE_DOCTOR_SOON,
         )
 
     found = extract_symptoms(request.message, predictor.symptoms)
@@ -101,6 +127,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=_follow_ups(predictor, previous),
             specialization=None,
             symptoms=previous,
+            urgency=_urgency(request),
         )
     if previous and set(found) <= set(previous):
         return ChatResponse(
@@ -108,6 +135,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=_follow_ups(predictor, previous),
             specialization=None,
             symptoms=previous,
+            urgency=_urgency(request),
         )
 
     symptoms = _merge(previous, found)
@@ -118,6 +146,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=[s for s in STARTER_SUGGESTIONS if s not in set(symptoms)],
             specialization=None,
             symptoms=symptoms,
+            urgency=_urgency(request),
         )
 
     top, *others = predictor.predict(symptoms)
@@ -129,15 +158,18 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=suggested,
             specialization=None,
             symptoms=symptoms,
+            urgency=_urgency(request),
         )
 
     message = f"Based on your symptoms this could be {top.disease}."
     if others:
         names = " or ".join(p.disease for p in others[:2])
         message += f" Other possibilities: {names}."
+    urgency = _urgency(request, top.disease)
     return ChatResponse(
-        message=f"{message} {DISCLAIMER}",
+        message=f"{message} {URGENCY_ADVICE[urgency]} {DISCLAIMER}",
         suggested=suggested,
         specialization=specialization_for(top.disease),
         symptoms=symptoms,
+        urgency=urgency,
     )
