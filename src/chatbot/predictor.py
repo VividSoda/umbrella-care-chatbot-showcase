@@ -105,11 +105,15 @@ class Predictor:
         )
         return entropy(posterior) - expected
 
-    def next_symptoms(self, present: Collection[str], n: int = 3) -> list[str]:
+    def next_symptoms(
+        self, present: Collection[str], n: int = 3, min_gain: float = 0.0
+    ) -> list[str]:
         """Symptoms worth asking next, best first.
 
         Ranks by expected information gain: the symptom whose answer would
-        narrow the candidate diseases the most. Reads the Naive Bayes
+        narrow the candidate diseases the most. Symptoms whose expected gain is
+        below `min_gain` are left out, so the list can be empty when nothing
+        separates the candidates. Reads the Naive Bayes
         parameters, so it is tied to BernoulliNB, like typical_symptoms.
 
         Raises ValueError for a name that is not one of the model's symptoms.
@@ -123,4 +127,6 @@ class Predictor:
         gain[present_idx] = -np.inf  # never ask what the user already told us
 
         best = np.argsort(gain)[::-1][:n]
-        return [self._symptoms[i] for i in best if gain[i] > -np.inf]
+        return [
+            self._symptoms[i] for i in best if gain[i] > -np.inf and gain[i] >= min_gain
+        ]

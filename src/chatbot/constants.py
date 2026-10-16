@@ -107,6 +107,14 @@ TOP_N_DISEASES = 3
 # ask for more symptoms. Naive Bayes is overconfident, so tune against real use.
 MIN_CONFIDENCE = 0.3
 
+# Top disease at or above this probability: it is clearly ahead, so stop
+# asking follow-up questions and just answer.
+STOP_CONFIDENCE = 0.9
+
+# A follow-up must be expected to cut uncertainty by at least this many nats
+# (see Predictor.next_symptoms), otherwise it is not worth asking.
+MIN_QUESTION_GAIN = 0.05
+
 
 def _normalize(label: str) -> str:
     return " ".join(label.split())

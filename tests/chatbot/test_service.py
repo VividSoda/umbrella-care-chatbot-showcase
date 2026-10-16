@@ -47,7 +47,9 @@ def test_unknown_symptoms_from_client_are_dropped(predictor):
     assert result.symptoms == ["cough"]
 
 
-def test_suggestions_are_symptoms_not_yet_mentioned(predictor):
+def test_suggestions_are_symptoms_not_yet_mentioned(predictor, monkeypatch):
+    monkeypatch.setattr(service, "STOP_CONFIDENCE", 1.1)  # keep asking
+    monkeypatch.setattr(service, "MIN_QUESTION_GAIN", 0.0)
     result = reply(predictor, "itching and a rash")
     assert result.suggested
     assert "itching" not in result.suggested
@@ -62,14 +64,18 @@ def test_low_confidence_asks_for_more_instead_of_guessing(predictor, monkeypatch
     assert result.symptoms == ["itching", "skin_rash"]
 
 
-def test_a_suggested_chip_sent_back_is_understood(predictor):
+def test_a_suggested_chip_sent_back_is_understood(predictor, monkeypatch):
+    monkeypatch.setattr(service, "STOP_CONFIDENCE", 1.1)  # keep asking
+    monkeypatch.setattr(service, "MIN_QUESTION_GAIN", 0.0)
     first = reply(predictor, "itching and a rash")
     chip = first.suggested[0]
     second = reply(predictor, chip, symptoms=first.symptoms)
     assert len(second.symptoms) == 3
 
 
-def test_unrelated_message_does_not_repeat_the_old_prediction(predictor):
+def test_unrelated_message_does_not_repeat_the_old_prediction(predictor, monkeypatch):
+    monkeypatch.setattr(service, "STOP_CONFIDENCE", 1.1)  # keep asking
+    monkeypatch.setattr(service, "MIN_QUESTION_GAIN", 0.0)
     result = reply(predictor, "my car won't start", symptoms=["itching", "skin_rash"])
     assert result.message == service.NOT_RECOGNIZED
     assert result.specialization is None
@@ -112,3 +118,16 @@ def test_a_negated_injury_is_not_treated_as_one(predictor):
     result = reply(predictor, "no fracture, just itching and a rash")
     assert result.message != service.INJURY
     assert result.specialization == "Dermatologist"
+
+
+def test_stops_asking_once_the_top_disease_is_clearly_ahead(predictor, monkeypatch):
+    monkeypatch.setattr(service, "STOP_CONFIDENCE", 0.5)
+    result = reply(predictor, "itching and a rash")
+    assert result.specialization is not None
+    assert result.suggested == []
+
+
+def test_no_question_is_asked_when_none_would_help(predictor, monkeypatch):
+    monkeypatch.setattr(service, "STOP_CONFIDENCE", 1.1)
+    monkeypatch.setattr(service, "MIN_QUESTION_GAIN", 10.0)
+    assert reply(predictor, "itching and a rash").suggested == []

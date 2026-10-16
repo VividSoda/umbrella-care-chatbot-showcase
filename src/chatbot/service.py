@@ -5,7 +5,9 @@ from src.chatbot.constants import (
     INJURY_PHRASES,
     INJURY_SPECIALIZATION,
     MIN_CONFIDENCE,
+    MIN_QUESTION_GAIN,
     MIN_SYMPTOMS,
+    STOP_CONFIDENCE,
     specialization_for,
 )
 from src.chatbot.predictor import Predictor
@@ -50,10 +52,22 @@ def _follow_ups(predictor: Predictor, symptoms: list[str]) -> list[str]:
     """Chips to offer when there is nothing new to predict from."""
     if len(symptoms) < MIN_SYMPTOMS:
         return [s for s in STARTER_SUGGESTIONS if s not in set(symptoms)]
-    top = predictor.predict(symptoms, top_n=1)[0]
+    return _best_questions(predictor, symptoms)
+
+
+def _best_questions(predictor: Predictor, symptoms: list[str]) -> list[str]:
+    """Chips for the symptoms whose answer would separate the candidates most.
+
+    Empty when the top disease is clearly ahead, or when no question is worth
+    asking: the reply then stands on its own.
+    """
+    if predictor.predict(symptoms, top_n=1)[0].probability >= STOP_CONFIDENCE:
+        return []
     return [
         _label(s)
-        for s in predictor.typical_symptoms(top.disease, symptoms, SUGGESTION_COUNT)
+        for s in predictor.next_symptoms(
+            symptoms, SUGGESTION_COUNT, min_gain=MIN_QUESTION_GAIN
+        )
     ]
 
 
@@ -107,10 +121,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
         )
 
     top, *others = predictor.predict(symptoms)
-    suggested = [
-        _label(s)
-        for s in predictor.typical_symptoms(top.disease, symptoms, SUGGESTION_COUNT)
-    ]
+    suggested = _best_questions(predictor, symptoms)
 
     if top.probability < MIN_CONFIDENCE:
         return ChatResponse(
