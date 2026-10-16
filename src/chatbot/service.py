@@ -5,12 +5,16 @@ from src.chatbot.constants import (
     INJURY_PHRASES,
     INJURY_SPECIALIZATION,
     MIN_CONFIDENCE,
+    MIN_QUESTION_GAIN,
     MIN_SYMPTOMS,
+    STOP_CONFIDENCE,
+    Urgency,
     specialization_for,
 )
 from src.chatbot.predictor import Predictor
-from src.chatbot.schemas import ChatRequest, ChatResponse
+from src.chatbot.schemas import ChatRequest, ChatResponse, TriageQuestion
 from src.chatbot.symptoms import extract_symptoms, mentions_any
+from src.chatbot.triage import assess
 
 DISCLAIMER = "This is not a diagnosis, please consult a doctor."
 ASK_MORE = "Can you tell me more? Are you having any other symptoms?"
@@ -32,6 +36,16 @@ INJURY = (
     f"is very painful, the limb looks out of place, or there is heavy bleeding, "
     f"go to an emergency room right away. {DISCLAIMER}"
 )
+URGENCY_ADVICE = {
+    Urgency.SELF_CARE: "This can often be managed at home, but see a doctor if it gets worse.",
+    Urgency.SEE_DOCTOR_SOON: "Please see a doctor soon.",
+    Urgency.EMERGENCY: "This could be serious. Get emergency care right away.",
+}
+# Asked in this order, each at most once. Skipping one never blocks the answer.
+TRIAGE_QUESTIONS: dict[TriageQuestion, str] = {
+    "duration": "How many days have you had these symptoms?",
+    "severity": "On a scale of 1 to 10, how severe is it?",
+}
 STARTER_SUGGESTIONS = ["headache", "fever", "cough", "stomach pain"]
 SUGGESTION_COUNT = 3
 
@@ -39,6 +53,29 @@ SUGGESTION_COUNT = 3
 def _label(symptom: str) -> str:
     """Readable chip text. It re-extracts to the same symptom when sent back."""
     return symptom.replace("_", " ")
+
+
+def _urgency(request: ChatRequest, disease: str | None = None) -> Urgency:
+    """Triage from the message and the profile. Pass `disease` only for a
+    prediction that is trusted enough to show; otherwise its floor is skipped."""
+    return assess(
+        request.message,
+        disease,
+        duration_days=request.duration_days,
+        severity=request.severity,
+        age=request.age,
+        pregnant=request.pregnant,
+        chronic_conditions=request.chronic_conditions,
+    )
+
+
+def _next_question(request: ChatRequest) -> TriageQuestion | None:
+    """The first triage question that is unanswered and not yet asked."""
+    answers = {"duration": request.duration_days, "severity": request.severity}
+    for question, answer in answers.items():
+        if answer is None and question not in request.asked:
+            return question
+    return None
 
 
 def _merge(previous: list[str], found: list[str]) -> list[str]:
@@ -50,10 +87,22 @@ def _follow_ups(predictor: Predictor, symptoms: list[str]) -> list[str]:
     """Chips to offer when there is nothing new to predict from."""
     if len(symptoms) < MIN_SYMPTOMS:
         return [s for s in STARTER_SUGGESTIONS if s not in set(symptoms)]
-    top = predictor.predict(symptoms, top_n=1)[0]
+    return _best_questions(predictor, symptoms)
+
+
+def _best_questions(predictor: Predictor, symptoms: list[str]) -> list[str]:
+    """Chips for the symptoms whose answer would separate the candidates most.
+
+    Empty when the top disease is clearly ahead, or when no question is worth
+    asking: the reply then stands on its own.
+    """
+    if predictor.predict(symptoms, top_n=1)[0].probability >= STOP_CONFIDENCE:
+        return []
     return [
         _label(s)
-        for s in predictor.typical_symptoms(top.disease, symptoms, SUGGESTION_COUNT)
+        for s in predictor.next_symptoms(
+            symptoms, SUGGESTION_COUNT, min_gain=MIN_QUESTION_GAIN
+        )
     ]
 
 
@@ -67,7 +116,11 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
     # decide what is said about a new emergency or injury.
     if mentions_any(request.message, EMERGENCY_PHRASES):
         return ChatResponse(
-            message=EMERGENCY, suggested=[], specialization=None, symptoms=previous
+            message=EMERGENCY,
+            suggested=[],
+            specialization=None,
+            symptoms=previous,
+            urgency=Urgency.EMERGENCY,
         )
     if mentions_any(request.message, INJURY_PHRASES):
         return ChatResponse(
@@ -75,25 +128,31 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=[],
             specialization=INJURY_SPECIALIZATION,
             symptoms=previous,
+            urgency=Urgency.SEE_DOCTOR_SOON,
         )
 
     found = extract_symptoms(request.message, predictor.symptoms)
+    # An answer to a triage question ("3 days") has no symptom in it, but still
+    # deserves a refreshed reply once there is enough to predict from.
+    refresh = request.answering is not None and len(previous) >= MIN_SYMPTOMS
 
     # Nothing new in this message: say so instead of repeating the old
     # prediction as if it answered what was just said.
-    if not found:
+    if not found and not refresh:
         return ChatResponse(
             message=NOT_RECOGNIZED,
             suggested=_follow_ups(predictor, previous),
             specialization=None,
             symptoms=previous,
+            urgency=_urgency(request),
         )
-    if previous and set(found) <= set(previous):
+    if previous and set(found) <= set(previous) and not refresh:
         return ChatResponse(
             message=ALREADY_NOTED,
             suggested=_follow_ups(predictor, previous),
             specialization=None,
             symptoms=previous,
+            urgency=_urgency(request),
         )
 
     symptoms = _merge(previous, found)
@@ -104,13 +163,11 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=[s for s in STARTER_SUGGESTIONS if s not in set(symptoms)],
             specialization=None,
             symptoms=symptoms,
+            urgency=_urgency(request),
         )
 
     top, *others = predictor.predict(symptoms)
-    suggested = [
-        _label(s)
-        for s in predictor.typical_symptoms(top.disease, symptoms, SUGGESTION_COUNT)
-    ]
+    suggested = _best_questions(predictor, symptoms)
 
     if top.probability < MIN_CONFIDENCE:
         return ChatResponse(
@@ -118,15 +175,24 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             suggested=suggested,
             specialization=None,
             symptoms=symptoms,
+            urgency=_urgency(request),
         )
 
     message = f"Based on your symptoms this could be {top.disease}."
     if others:
         names = " or ".join(p.disease for p in others[:2])
         message += f" Other possibilities: {names}."
+    urgency = _urgency(request, top.disease)
+    # No questions in an emergency: the advice is to go now.
+    ask = None if urgency == Urgency.EMERGENCY else _next_question(request)
+    message += f" {URGENCY_ADVICE[urgency]}"
+    if ask:
+        message += f" {TRIAGE_QUESTIONS[ask]}"
     return ChatResponse(
         message=f"{message} {DISCLAIMER}",
         suggested=suggested,
         specialization=specialization_for(top.disease),
         symptoms=symptoms,
+        urgency=urgency,
+        ask=ask,
     )

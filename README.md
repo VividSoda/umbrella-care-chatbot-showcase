@@ -94,28 +94,63 @@ CHATBOT_API_URL=http://<your-lan-ip>:8000/api/v1/chatbot/
 Request:
 
 ```json
-{ "message": "I have a headache and feel sick", "symptoms": ["mild_fever"] }
+{
+  "message": "I have a headache and feel sick",
+  "symptoms": ["mild_fever"],
+  "duration_days": 3,
+  "severity": 6,
+  "age": 34,
+  "sex": "female",
+  "pregnant": false,
+  "chronic_conditions": ["asthma"],
+  "asked": ["duration"],
+  "answering": "duration"
+}
 ```
 
 - `message` is required, 1–500 characters.
 - `symptoms` is optional. Send back the `symptoms` array from the previous response unchanged, since the server keeps no history. These are model symptom names such as `mild_fever`, not free text. Names the model does not know are ignored.
+- Triage fields, all optional. Send only what the user answered or agreed to share; a missing field never makes the result safer.
+  - `duration_days`: 0–3650.
+  - `severity`: 1–10.
+  - `age`: 0–120.
+  - `sex`: `male`, `female` or `other`.
+  - `pregnant`: boolean.
+  - `chronic_conditions`: up to 20 short strings.
+- `asked` lists the triage questions (`duration`, `severity`) already asked, copied from earlier responses' `ask`. The server uses it to avoid asking twice, and a skipped question stays skipped.
+- `answering` is set to `duration` or `severity` when this message answers (or skips) that question. The message then needs no symptom in it, and the reply is refreshed with the new values.
 
 Response:
 
 ```json
 {
-  "message": "Based on your symptoms this could be Migraine. Other possibilities: Hypertension or Vertigo. This is not a diagnosis, please consult a doctor.",
+  "message": "Based on your symptoms this could be Migraine. Other possibilities: Hypertension or Vertigo. This can often be managed at home, but see a doctor if it gets worse. On a scale of 1 to 10, how severe is it? This is not a diagnosis, please consult a doctor.",
   "suggested": ["dizziness", "nausea", "vomiting"],
   "specialization": "Neurologist",
-  "symptoms": ["mild_fever", "headache", "nausea"]
+  "symptoms": ["mild_fever", "headache", "nausea"],
+  "urgency": "self_care",
+  "ask": "severity"
 }
 ```
 
-- `suggested` are quick-reply chips: symptoms common in the predicted disease that the user has not mentioned. Sending a chip back as the next `message` is understood as-is.
+- `suggested` are quick-reply chips: the symptoms whose answer would best tell the likely diseases apart. Sending a chip back as the next `message` is understood as-is. It is empty once the top disease is clearly ahead.
 - `specialization` is one of the Flutter app's doctor categories, or `null` while there is not enough to go on.
 - `symptoms` is everything recognized so far. Store it and send it with the next request.
+- `urgency` is `self_care`, `see_doctor_soon` or `emergency`.
+- `ask` is `duration`, `severity` or `null`: the triage question this reply asks. Show a matching input, then send the value in the next request and add the question to `asked`.
 
 If fewer than the minimum number of symptoms are recognized, or the best guess is below the confidence threshold, `specialization` is `null` and the message asks for more detail.
+
+### Urgency
+
+Urgency comes from plain rules in `src/chatbot/triage.py`, never from a model or an LLM. The highest level any rule calls for wins, and nothing lowers it:
+
+- An emergency phrase in the message (for example "seizure", "not breathing") gives `emergency`. It is checked first, on the message alone, and the model never runs.
+- The predicted disease sets a floor (`DISEASE_URGENCY` in `constants.py`). A disease not listed there defaults to `see_doctor_soon`.
+- A red-flag phrase ("chest pain", "blood in stool"), severity of 7 or more, or symptoms lasting 7 days or more give at least `see_doctor_soon`.
+- Age under 5 or over 65, pregnancy, or a chronic condition also give at least `see_doctor_soon`, but never `emergency` on their own.
+
+The questions are asked at most once each, after a prediction the bot trusts, and never during an emergency. Answering them is optional and never blocks the reply. The disease floors, red-flag phrases and thresholds are a first draft and need clinician review before release.
 
 ## Deploy
 
