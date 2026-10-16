@@ -1,0 +1,87 @@
+name: CI/CD
+
+# Every pull request is linted and tested. A merge to main also deploys to
+# Cloud Run. Auth is keyless (Workload Identity Federation): no secrets are
+# stored in GitHub. One-time Google Cloud setup is in the README ("CI/CD").
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push to a PR cancels its older run, but never
+# cancels a deploy that is already in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PROJECT_ID: umbrellacare-d6eb0
+  REGION: asia-south1
+  SERVICE: umbrella-care-chatbot
+  REPOSITORY: cloud-run-source-deploy
+  WIF_PROVIDER: projects/707329620333/locations/global/workloadIdentityPools/github/providers/umbrella-care-chatbot-backend
+  DEPLOYER_SA: github-deployer@umbrellacare-d6eb0.iam.gserviceaccount.com
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # lets the job exchange its GitHub token for Google credentials
+    env:
+      IMAGE: asia-south1-docker.pkg.dev/umbrellacare-d6eb0/cloud-run-source-deploy/umbrella-care-chatbot:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Build and push image
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}
+          env_vars: ENVIRONMENT=production
+          flags: --memory=512Mi --cpu-boost --min-instances=0 --max-instances=2 --timeout=30
+
+      # Fail the run if the new revision doesn't come up healthy.
+      - name: Smoke test
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for i in 1 2 3 4 5; do
+            curl -fsS "$URL/health/ready" && exit 0
+            sleep 5
+          done
+          echo "Service did not become ready" >&2
+          exit 1

@@ -172,6 +172,48 @@ Notes:
 - Keep the app's HTTP timeout generous anyway (the app uses 60 s).
 - After retraining, commit the new `artifacts/model.joblib` and redeploy. scikit-learn must stay pinned to the version that trained it.
 
+### Deploy on merge (CI/CD)
+
+`.github/workflows/ci-cd.yml` lints and tests every pull request. A merge to `main` also builds the image, pushes it to Artifact Registry tagged with the commit SHA, deploys it to Cloud Run, and smoke-tests `/health/ready`. To roll back, redeploy an earlier SHA's image from the Cloud Run console.
+
+GitHub authenticates to Google with Workload Identity Federation, so no key or secret is stored in GitHub. Do this setup once (the values match the workflow's `env` block):
+
+```bash
+P=umbrellacare-d6eb0
+N=707329620333                                  # project number
+REGION=asia-south1
+REPO=VividSoda/umbrella-care-chatbot-backend    # GitHub owner/repo
+SA=github-deployer@$P.iam.gserviceaccount.com
+
+# 1. A service account that only the CI job can impersonate
+gcloud iam service-accounts create github-deployer --project $P \
+  --display-name "GitHub Actions deployer"
+
+# 2. Trust GitHub's tokens, but only from this one repository
+gcloud iam workload-identity-pools create github --project $P \
+  --location global --display-name "GitHub Actions"
+gcloud iam workload-identity-pools providers create-oidc umbrella-care-chatbot-backend \
+  --project $P --location global --workload-identity-pool github \
+  --issuer-uri https://token.actions.githubusercontent.com \
+  --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition "assertion.repository == '$REPO'"
+gcloud iam service-accounts add-iam-policy-binding $SA --project $P \
+  --role roles/iam.workloadIdentityUser \
+  --member "principalSet://iam.googleapis.com/projects/$N/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+
+# 3. Least privilege: push images, update this one service, act as its runtime account
+gcloud artifacts repositories add-iam-policy-binding cloud-run-source-deploy \
+  --project $P --location $REGION --role roles/artifactregistry.writer --member serviceAccount:$SA
+gcloud run services add-iam-policy-binding umbrella-care-chatbot \
+  --project $P --region $REGION --role roles/run.developer --member serviceAccount:$SA
+gcloud iam service-accounts add-iam-policy-binding $N-compute@developer.gserviceaccount.com \
+  --project $P --role roles/iam.serviceAccountUser --member serviceAccount:$SA
+```
+
+Then, in GitHub, protect `main` (Settings → Branches → require the `test` check to pass before merging) so a failing PR can't reach the deploy.
+
+If the first deploy fails with "Permission denied to use service", grant the account `roles/serviceusage.serviceUsageConsumer` on the project.
+
 ## Development
 
 - Lint and format: `ruff check . && ruff format .`
@@ -180,3 +222,7 @@ Notes:
 - Set `ENVIRONMENT=production` on the host to turn off `/docs` and `/openapi.json`.
 - Review against the FastAPI checklist: run `/fast-review` in Claude Code from this directory.
 - Keep `.env` out of git. List every variable in `.env.example`.
+
+## Roadmap
+
+Planned improvements, in the order to tackle them, are in [`docs/roadmap.md`](docs/roadmap.md).

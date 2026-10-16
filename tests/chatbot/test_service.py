@@ -67,3 +67,48 @@ def test_a_suggested_chip_sent_back_is_understood(predictor):
     chip = first.suggested[0]
     second = reply(predictor, chip, symptoms=first.symptoms)
     assert len(second.symptoms) == 3
+
+
+def test_unrelated_message_does_not_repeat_the_old_prediction(predictor):
+    result = reply(predictor, "my car won't start", symptoms=["itching", "skin_rash"])
+    assert result.message == service.NOT_RECOGNIZED
+    assert result.specialization is None
+    assert result.symptoms == ["itching", "skin_rash"]
+    assert result.suggested
+
+
+def test_repeating_known_symptoms_does_not_repeat_the_prediction(predictor):
+    result = reply(predictor, "itching", symptoms=["itching", "skin_rash"])
+    assert result.message == service.ALREADY_NOTED
+    assert result.specialization is None
+    assert result.symptoms == ["itching", "skin_rash"]
+
+
+def test_emergency_wins_over_earlier_symptoms(predictor):
+    result = reply(
+        predictor, "I have cardiac arrest", symptoms=["itching", "skin_rash"]
+    )
+    assert result.message == service.EMERGENCY
+    assert result.specialization is None
+    assert result.suggested == []
+    assert result.symptoms == ["itching", "skin_rash"]
+
+
+def test_injury_points_to_orthopedics_without_touching_symptoms(predictor):
+    result = reply(predictor, "I have a fractured hand", symptoms=["itching"])
+    assert result.message == service.INJURY
+    assert result.specialization == "Orthopedic"
+    assert result.symptoms == ["itching"]
+    assert service.DISCLAIMER in result.message
+
+
+def test_injury_is_recognized_without_any_earlier_symptoms(predictor):
+    result = reply(predictor, "my toe is broken")
+    assert result.specialization == "Orthopedic"
+    assert result.symptoms == []
+
+
+def test_a_negated_injury_is_not_treated_as_one(predictor):
+    result = reply(predictor, "no fracture, just itching and a rash")
+    assert result.message != service.INJURY
+    assert result.specialization == "Dermatologist"

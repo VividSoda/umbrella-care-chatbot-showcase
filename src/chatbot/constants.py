@@ -51,6 +51,52 @@ DISEASE_TO_SPECIALIZATION: dict[str, str] = {
     "hepatitis A": "Gastroenterologist",
 }
 
+# Life-threatening situations the symptom model can't judge. The reply tells the
+# user to get emergency help instead of predicting from earlier symptoms.
+EMERGENCY_PHRASES: tuple[str, ...] = (
+    "cardiac arrest",
+    "stroke",
+    "not breathing",
+    "stopped breathing",
+    "cant breathe at all",
+    "unconscious",
+    "passed out",
+    "seizure",
+    "severe bleeding",
+    "bleeding heavily",
+    "overdose",
+    "poisoning",
+    "suicidal",
+    "want to die",
+)
+
+# Bone and joint injuries are not in the disease dataset, so they get a
+# dedicated reply pointing to this specialization.
+INJURY_SPECIALIZATION = "Orthopedic"
+INJURY_PHRASES: tuple[str, ...] = (
+    "fracture",
+    "fractured",
+    "broken bone",
+    "broken bones",
+    "broke my",
+    "broken arm",
+    "broken leg",
+    "broken hand",
+    "broken foot",
+    "broken finger",
+    "broken toe",
+    "broken rib",
+    "broken wrist",
+    "broken ankle",
+    "is broken",
+    "are broken",
+    "dislocated",
+    "dislocation",
+    "sprain",
+    "sprained",
+    "torn ligament",
+)
+
 # Fewer recognized symptoms than this: ask a follow-up instead of predicting.
 MIN_SYMPTOMS = 2
 

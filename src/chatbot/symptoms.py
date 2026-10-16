@@ -198,14 +198,18 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
 _NEGATORS = frozenset({"no", "not", "without", "never", "dont", "didnt", "isnt", "nor"})
 _NEGATION_WINDOW = 3
 # A contrast word ends a negation's reach ("no cough but fever").
-_BREAKERS = frozenset({"but", "however", "although"})
+_BREAKERS = frozenset({"but", "however", "although", "clausebreak"})
 
 _NON_WORD = re.compile(r"[^a-z0-9]+")
+_CLAUSE_END = re.compile(r"[,.;:!?\n]")
 
 
 def _tokenize(text: str) -> list[str]:
     # Apostrophes are dropped, not split on, so "don't" becomes "dont".
     text = text.lower().replace("'", "").replace("’", "")
+    # Punctuation ends a clause, so a negation ("no fracture, just a rash")
+    # does not reach into the next one. `clausebreak` is in _BREAKERS.
+    text = _CLAUSE_END.sub(" clausebreak ", text)
     return _NON_WORD.sub(" ", text).split()
 
 
@@ -255,3 +259,19 @@ def extract_symptoms(text: str, known: Collection[str]) -> list[str]:
                 found[symptom] = min(start, found.get(symptom, start))
 
     return sorted(found, key=found.__getitem__)
+
+
+def mentions_any(text: str, phrases: Collection[str]) -> bool:
+    """True if `text` contains one of `phrases`, unless it is negated ("no fracture")."""
+    tokens = _tokenize(text)
+    for phrase in phrases:
+        target = _tokenize(phrase)
+        size = len(target)
+        if not size:
+            continue
+        for start in range(len(tokens) - size + 1):
+            if tokens[start : start + size] == target and not _is_negated(
+                tokens, start
+            ):
+                return True
+    return False

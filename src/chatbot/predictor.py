@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from src.chatbot.constants import TOP_N_DISEASES
+from src.chatbot.utils import entropy, softmax
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,13 @@ class Predictor:
         self._known = frozenset(symptoms)
         # Dataset labels have stray whitespace ("Diabetes ", double spaces).
         self._labels = [" ".join(str(c).split()) for c in model.classes_]
+
+        # Naive Bayes parameters for next_symptoms, computed once.
+        self._index = {s: i for i, s in enumerate(symptoms)}
+        self._log_prior = model.class_log_prior_  # (diseases,)
+        self._log_yes = model.feature_log_prob_  # (diseases, symptoms)
+        self._log_no = np.log1p(-np.exp(self._log_yes))  # log P(absent | disease)
+        self._p_yes = np.exp(self._log_yes)
 
     @classmethod
     def load(cls, path: Path) -> "Predictor":
@@ -73,3 +81,46 @@ class Predictor:
         return [self._symptoms[i] for i in ranked if self._symptoms[i] not in skipped][
             :n
         ]
+
+    def _posterior(self, present_idx: list[int]) -> np.ndarray:
+        """P(disease | symptoms the user has). Unanswered symptoms are ignored,
+        not treated as absent."""
+        scores = self._log_prior.copy()
+        if present_idx:
+            scores += self._log_yes[:, present_idx].sum(axis=1)
+        return softmax(scores)
+
+    def _info_gain(self, posterior: np.ndarray) -> np.ndarray:
+        """Expected drop in uncertainty from asking each symptom, shape (n_symptoms,)."""
+        chance_yes = posterior @ self._p_yes  # P(user says yes), per symptom
+
+        after_yes = posterior[:, None] * self._p_yes  # (diseases, symptoms)
+        after_yes /= after_yes.sum(axis=0, keepdims=True)  # belief if the answer is yes
+
+        after_no = posterior[:, None] * np.exp(self._log_no)
+        after_no /= after_no.sum(axis=0, keepdims=True)  # belief if the answer is no
+
+        expected = chance_yes * entropy(after_yes.T) + (1 - chance_yes) * entropy(
+            after_no.T
+        )
+        return entropy(posterior) - expected
+
+    def next_symptoms(self, present: Collection[str], n: int = 3) -> list[str]:
+        """Symptoms worth asking next, best first.
+
+        Ranks by expected information gain: the symptom whose answer would
+        narrow the candidate diseases the most. Reads the Naive Bayes
+        parameters, so it is tied to BernoulliNB, like typical_symptoms.
+
+        Raises ValueError for a name that is not one of the model's symptoms.
+        """
+        unknown = set(present) - self._known
+        if unknown:
+            raise ValueError(f"Unknown symptoms: {sorted(unknown)}")
+
+        present_idx = [self._index[s] for s in present]
+        gain = self._info_gain(self._posterior(present_idx))
+        gain[present_idx] = -np.inf  # never ask what the user already told us
+
+        best = np.argsort(gain)[::-1][:n]
+        return [self._symptoms[i] for i in best if gain[i] > -np.inf]
