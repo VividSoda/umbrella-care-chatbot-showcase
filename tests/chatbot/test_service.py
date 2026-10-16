@@ -206,3 +206,101 @@ def test_unsure_prediction_ignores_the_disease_floor(predictor, monkeypatch):
 
 def test_not_recognized_reply_reports_self_care(predictor):
     assert reply(predictor, "hello").urgency == Urgency.SELF_CARE
+
+
+def ask_reply(predictor, message="itching and a rash", symptoms=(), **fields):
+    request = ChatRequest(message=message, symptoms=list(symptoms), **fields)
+    return build_reply(request, predictor)
+
+
+def test_first_prediction_asks_for_duration(predictor):
+    result = ask_reply(predictor)
+    assert result.ask == "duration"
+    assert service.TRIAGE_QUESTIONS["duration"] in result.message
+    assert result.message.endswith(DISCLAIMER)
+    assert result.specialization is not None  # the answer is not held back
+
+
+def test_then_asks_for_severity(predictor):
+    result = ask_reply(predictor, duration_days=3, asked=["duration"])
+    assert result.ask == "severity"
+
+
+def test_a_skipped_question_is_not_asked_again(predictor):
+    result = ask_reply(predictor, asked=["duration"])
+    assert result.ask == "severity"
+    result = ask_reply(predictor, asked=["duration", "severity"])
+    assert result.ask is None
+
+
+def test_answered_questions_are_not_asked(predictor):
+    result = ask_reply(predictor, duration_days=3, severity=4)
+    assert result.ask is None
+    assert service.TRIAGE_QUESTIONS["duration"] not in result.message
+
+
+def test_no_question_after_an_emergency(predictor):
+    result = ask_reply(predictor, "I think I have a seizure")
+    assert result.ask is None
+
+
+def test_no_question_when_the_disease_floor_is_an_emergency(predictor, monkeypatch):
+    monkeypatch.setattr(
+        service_constants, "_NORMALIZED_URGENCY", {"Acne": Urgency.EMERGENCY}
+    )
+    assert ask_reply(predictor).ask is None
+
+
+def test_no_question_without_a_prediction(predictor):
+    assert ask_reply(predictor, "I have a cough").ask is None
+    assert ask_reply(predictor, "hello").ask is None
+
+
+def test_no_question_when_the_prediction_is_too_uncertain(predictor, monkeypatch):
+    monkeypatch.setattr(service, "MIN_CONFIDENCE", 0.999)
+    assert ask_reply(predictor).ask is None
+
+
+def test_answering_refreshes_the_reply_without_a_new_symptom(predictor):
+    first = ask_reply(predictor)
+    result = ask_reply(
+        predictor,
+        "10 days",
+        symptoms=first.symptoms,
+        duration_days=10,
+        asked=["duration"],
+        answering="duration",
+    )
+    assert result.message != service.NOT_RECOGNIZED
+    assert result.symptoms == first.symptoms
+    assert result.urgency == Urgency.SEE_DOCTOR_SOON  # long duration
+    assert result.ask == "severity"
+
+
+def test_skipping_still_refreshes_the_reply(predictor):
+    first = ask_reply(predictor)
+    result = ask_reply(
+        predictor,
+        "skip",
+        symptoms=first.symptoms,
+        asked=["duration"],
+        answering="duration",
+    )
+    assert result.specialization is not None
+    assert result.ask == "severity"
+
+
+def test_unrelated_text_is_still_not_recognized_without_answering(predictor):
+    result = ask_reply(
+        predictor, "my car won't start", symptoms=["itching", "skin_rash"],
+        duration_days=3, asked=["duration"],
+    )  # fmt: skip
+    assert result.message == service.NOT_RECOGNIZED
+
+
+def test_answering_with_too_few_symptoms_is_not_a_prediction(predictor):
+    result = ask_reply(
+        predictor, "3 days", symptoms=["cough"], duration_days=3, answering="duration"
+    )
+    assert result.message == service.NOT_RECOGNIZED
+    assert result.specialization is None

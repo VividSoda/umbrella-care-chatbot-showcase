@@ -12,7 +12,7 @@ from src.chatbot.constants import (
     specialization_for,
 )
 from src.chatbot.predictor import Predictor
-from src.chatbot.schemas import ChatRequest, ChatResponse
+from src.chatbot.schemas import ChatRequest, ChatResponse, TriageQuestion
 from src.chatbot.symptoms import extract_symptoms, mentions_any
 from src.chatbot.triage import assess
 
@@ -41,6 +41,11 @@ URGENCY_ADVICE = {
     Urgency.SEE_DOCTOR_SOON: "Please see a doctor soon.",
     Urgency.EMERGENCY: "This could be serious. Get emergency care right away.",
 }
+# Asked in this order, each at most once. Skipping one never blocks the answer.
+TRIAGE_QUESTIONS: dict[TriageQuestion, str] = {
+    "duration": "How many days have you had these symptoms?",
+    "severity": "On a scale of 1 to 10, how severe is it?",
+}
 STARTER_SUGGESTIONS = ["headache", "fever", "cough", "stomach pain"]
 SUGGESTION_COUNT = 3
 
@@ -62,6 +67,15 @@ def _urgency(request: ChatRequest, disease: str | None = None) -> Urgency:
         pregnant=request.pregnant,
         chronic_conditions=request.chronic_conditions,
     )
+
+
+def _next_question(request: ChatRequest) -> TriageQuestion | None:
+    """The first triage question that is unanswered and not yet asked."""
+    answers = {"duration": request.duration_days, "severity": request.severity}
+    for question, answer in answers.items():
+        if answer is None and question not in request.asked:
+            return question
+    return None
 
 
 def _merge(previous: list[str], found: list[str]) -> list[str]:
@@ -118,10 +132,13 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
         )
 
     found = extract_symptoms(request.message, predictor.symptoms)
+    # An answer to a triage question ("3 days") has no symptom in it, but still
+    # deserves a refreshed reply once there is enough to predict from.
+    refresh = request.answering is not None and len(previous) >= MIN_SYMPTOMS
 
     # Nothing new in this message: say so instead of repeating the old
     # prediction as if it answered what was just said.
-    if not found:
+    if not found and not refresh:
         return ChatResponse(
             message=NOT_RECOGNIZED,
             suggested=_follow_ups(predictor, previous),
@@ -129,7 +146,7 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
             symptoms=previous,
             urgency=_urgency(request),
         )
-    if previous and set(found) <= set(previous):
+    if previous and set(found) <= set(previous) and not refresh:
         return ChatResponse(
             message=ALREADY_NOTED,
             suggested=_follow_ups(predictor, previous),
@@ -166,10 +183,16 @@ def build_reply(request: ChatRequest, predictor: Predictor) -> ChatResponse:
         names = " or ".join(p.disease for p in others[:2])
         message += f" Other possibilities: {names}."
     urgency = _urgency(request, top.disease)
+    # No questions in an emergency: the advice is to go now.
+    ask = None if urgency == Urgency.EMERGENCY else _next_question(request)
+    message += f" {URGENCY_ADVICE[urgency]}"
+    if ask:
+        message += f" {TRIAGE_QUESTIONS[ask]}"
     return ChatResponse(
-        message=f"{message} {URGENCY_ADVICE[urgency]} {DISCLAIMER}",
+        message=f"{message} {DISCLAIMER}",
         suggested=suggested,
         specialization=specialization_for(top.disease),
         symptoms=symptoms,
         urgency=urgency,
+        ask=ask,
     )

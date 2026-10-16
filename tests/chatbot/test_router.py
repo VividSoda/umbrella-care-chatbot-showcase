@@ -63,6 +63,9 @@ def test_previous_symptoms_round_trip(client):
         {"message": "hi", "chronic_conditions": ["x" * 65]},
         {"message": "hi", "chronic_conditions": [""]},
         {"message": "hi", "chronic_conditions": ["a"] * 21},
+        {"message": "hi", "asked": ["mood"]},
+        {"message": "hi", "asked": ["duration", "severity", "duration"]},
+        {"message": "hi", "answering": "mood"},
     ],
 )
 def test_invalid_requests_are_rejected(client, payload):
@@ -78,6 +81,8 @@ def test_triage_fields_are_optional_and_accepted(client):
         "sex": "female",
         "pregnant": False,
         "chronic_conditions": ["asthma"],
+        "asked": ["duration"],
+        "answering": "duration",
     }
     assert client.post(URL, json=payload).status_code == 200
 
@@ -85,4 +90,4 @@ def test_triage_fields_are_optional_and_accepted(client):
 def test_urgency_is_sent_as_text(client):
     body = client.post(URL, json={"message": "itching and a rash"}).json()
     assert body["urgency"] == "self_care"
-    assert body["ask"] is None
+    assert body["ask"] == "duration"

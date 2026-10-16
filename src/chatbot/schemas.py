@@ -14,6 +14,7 @@ _MAX_AGE = 120
 _MAX_CHRONIC_CONDITIONS = 20
 
 Symptom = Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]
+TriageQuestion = Literal["duration", "severity"]
 ChronicCondition = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
 ]
@@ -35,6 +36,13 @@ class ChatRequest(BaseModel):
     chronic_conditions: list[ChronicCondition] = Field(
         default_factory=list, max_length=_MAX_CHRONIC_CONDITIONS
     )
+    # Triage questions already asked, echoed from earlier responses' `ask`. The
+    # server keeps no history, so this is how it avoids asking twice (and how a
+    # skipped question stays skipped).
+    asked: list[TriageQuestion] = Field(default_factory=list, max_length=2)
+    # Set when this message answers (or skips) that question: the message needs
+    # no new symptom, and the reply is refreshed with the new triage values.
+    answering: TriageQuestion | None = None
 
 
 class ChatResponse(BaseModel):
@@ -51,7 +59,7 @@ class ChatResponse(BaseModel):
     urgency: Urgency = Urgency.SELF_CARE
     # The triage question this reply asks, so the app can show the matching
     # input. None when the reply asks nothing.
-    ask: Literal["duration", "severity"] | None = None
+    ask: TriageQuestion | None = None
 
     @field_serializer("urgency")
     def _urgency_as_text(self, urgency: Urgency) -> str:
