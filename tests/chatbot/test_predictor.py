@@ -78,3 +78,9 @@ def test_real_model_returns_ranked_top_three():
     top = real.predict(["itching", "skin_rash"])
     assert len(top) == 3
     assert top[0].probability >= top[1].probability >= top[2].probability
+
+
+def test_unmentioned_symptoms_are_ignored_not_treated_as_absent(predictor):
+    result = predictor.predict(["itching"], top_n=10)
+    assert result[0].disease == "Acne"
+    assert sum(p.probability for p in result) == pytest.approx(1.0)

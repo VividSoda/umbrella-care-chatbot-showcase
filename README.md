@@ -258,6 +258,50 @@ If the first deploy fails with "Permission denied to use service", grant the acc
 - Review against the FastAPI checklist: run `/fast-review` in Claude Code from this directory.
 - Keep `.env` out of git. List every variable in `.env.example`.
 
+## Evaluation
+
+How good is the model when a user names only a few symptoms? The usual 98%
+figure gives the model all 132 symptoms of a patient, which a chat user never
+does. `ml/evaluate_model.py` hides all but `k` of each test patient's symptoms,
+using 5-fold cross-validation so the model never sees the patient it is tested
+on. Run it with `cd ml && python evaluate_model.py`.
+
+**Accuracy by symptoms named.** "Current" treated every unmentioned symptom as
+absent (the old `Predictor.predict`). "Partial" treats them as unknown, which is
+what the bot does now.
+
+| Symptoms named | Current | Partial |
+|---|---|---|
+| 2 | 43.6% | 69.1% |
+| 3 | 62.5% | 83.8% |
+| 5 | 80.7% | 93.2% |
+
+**Can the confidence be trusted?** With two symptoms, "partial" is
+underconfident but ranks cases well: guesses it rated 0.3 to 0.5 were right 92%
+of the time. "Current" was overconfident: rated 0.7 to 0.9, right 65%.
+
+**Thresholds** (two symptoms, partial):
+
+| Answer only if confidence is at least | Bot answers | Right when it answers |
+|---|---|---|
+| 0.2 | 78% | 81% |
+| 0.3 | 47% | 93% |
+| 0.4 | 22% | 99% |
+| 0.5 | 6% | 100% |
+
+`MIN_CONFIDENCE = 0.3`: favours accuracy while still answering about half the
+time on two symptoms. `STOP_CONFIDENCE = 0.6`: with three or more symptoms the
+top guess was right every time it reached this level.
+
+Model comparison, 5-fold CV on all rows: BernoulliNB 97.7%, random forest
+100%. Both are near the ceiling, so the data is the limit, and the forest would
+break the question picker, which reads Naive Bayes internals.
+
+> The dataset is synthetic, with only 304 unique rows, so these numbers
+> describe this data, not real patients. Trust the gaps between methods more
+> than the absolute percentages. The full method is in
+> [`docs/model_evaluation.md`](docs/model_evaluation.md).
+
 ## Roadmap
 
 Planned improvements, in the order to tackle them, are in [`docs/roadmap.md`](docs/roadmap.md).

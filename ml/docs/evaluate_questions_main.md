@@ -157,6 +157,31 @@ for name, col in (("top-1 accuracy", 0), ("top-3 accuracy", 1)):
 point" into "fraction of patients right at this point". Two tables are printed,
 one for top-1 and one for top-3, each with one row per strategy.
 
+## Related: `pick_symptoms` in `evaluate_model.py`
+
+`run_patient` samples the opening symptoms inline (`rng.choice(present,
+size=min(START, len(present)), replace=False)`). `evaluate_model.py` has the
+same idea as a standalone helper:
+
+```python
+def pick_symptoms(patient_row, k, rng):
+    """Pretend the patient only told us k of the symptoms they really have."""
+    have = np.flatnonzero(patient_row)
+    return set(rng.choice(have, size=min(k, len(have)), replace=False))
+```
+
+- **Purpose:** simulate a patient who reports only `k` of the symptoms they
+  really have, so model quality can be measured under incomplete input.
+- **How:** `np.flatnonzero` finds the real symptoms, then `k` of them are
+  sampled without replacement. If the patient has fewer than `k`, all of them
+  are used.
+- **Reproducibility:** it takes the random generator as an argument rather than
+  using global randomness. Seeding it the same way as step 5 gives identical
+  samples across runs.
+- **Difference from `run_patient`:** `START` is fixed at 2 here, whereas
+  `pick_symptoms` takes `k` as a parameter. Sweeping `k` (1, 2, 3, ...) shows
+  how accuracy and calibration degrade as less is reported.
+
 ## How to read the output
 
 Each row is one strategy. Read across it to see how accuracy climbs as questions
