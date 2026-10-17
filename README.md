@@ -4,6 +4,10 @@ A small, stateless FastAPI service behind the UmbrellaCare Flutter app's chatbot
 
 > This is not a medical diagnosis tool. Every reply carries a disclaimer telling the user to consult a doctor.
 
+**About this project.** A personal portfolio project: a symptom chatbot backend with a Naive Bayes model, information-gain follow-up questions, rule-based urgency triage and an honest evaluation of the model (see [Evaluation](#evaluation)). The design decisions, the evaluation and the safety rules are mine; I built it with AI coding assistance (Claude Code) and reviewed and tested what it produced. The training data is synthetic, so this is a demonstration, not a clinical tool.
+
+**Status.** Working end to end with the [Flutter app](https://github.com/VividSoda/UmbrellaCare). Next steps are in the [roadmap](docs/roadmap.md): better doctor ranking and booking from the chat, and a clinician review of the urgency rules.
+
 ## How it works
 
 ```
@@ -37,10 +41,16 @@ src/
     exceptions.py    chatbot-specific errors
 ml/
   train.py           trains the model (run locally, not on the server)
+  evaluate_model.py  honest accuracy and confidence evaluation
+  evaluate_questions.py  compares follow-up question strategies
   data/              training CSVs
 artifacts/
   model.joblib       output of train.py, deployed with the code
 tests/               mirrors src/
+docs/
+  roadmap.md         planned improvements
+  model_evaluation.md  how the model was evaluated and why
+  learning/          my study notes (not needed to run the project)
 ```
 
 Layout follows `.claude/skills/fast-review/checklist.md`: organized by domain, thin `main.py` and routers, logic in services.
@@ -305,3 +315,7 @@ break the question picker, which reads Naive Bayes internals.
 ## Roadmap
 
 Planned improvements, in the order to tackle them, are in [`docs/roadmap.md`](docs/roadmap.md).
+
+## License
+
+[MIT](LICENSE)
