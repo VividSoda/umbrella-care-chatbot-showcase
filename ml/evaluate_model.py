@@ -66,3 +66,29 @@ def print_reliability_table(results):
                 f"{low:.1f} - {min(high, 1.0):.1f}        {in_bin.sum():6d}"
                 f"   {right[in_bin].mean():10.0%}   {confidence[in_bin].mean():10.0%}"
             )
+
+
+def print_threshold_table(results):
+    confidence, right = results[:, 0], results[:, 1]
+    print("threshold   answered   right when answered")
+    for t in (0.2, 0.3, 0.4, 0.5, 0.6):
+        answered = confidence >= t
+        if answered.any():
+            print(
+                f"{t:.1f}         {answered.mean():6.0%}      {right[answered].mean():10.0%}"
+            )
+
+
+def main():
+    X, y = load()
+    print_accuracy_table(X, y)
+    print("\n--- reliability, 2 symptoms, current method ---")
+    print_reliability_table(collect_results(X, y, 2, "current"))
+    print("\n--- reliability, 2 symptoms, ignore-unmentioned ---")
+    print_reliability_table(collect_results(X, y, 2, "partial"))
+    print("\n--- thresholds, 2 symptoms, ignore-unmentioned ---")
+    print_threshold_table(collect_results(X, y, 2, "partial"))
+
+
+if __name__ == "__main__":
+    main()
