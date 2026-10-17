@@ -106,12 +106,16 @@ MIN_SYMPTOMS = 2
 TOP_N_DISEASES = 3
 
 # Top disease below this probability: treat the prediction as too uncertain and
-# ask for more symptoms. Naive Bayes is overconfident, so tune against real use.
+# ask for more symptoms. Chosen from the threshold table in
+# docs/model_evaluation.md: with two symptoms named, the bot answers about half
+# the time and is right 93% of those (on the synthetic dataset).
 MIN_CONFIDENCE = 0.3
 
 # Top disease at or above this probability: it is clearly ahead, so stop
-# asking follow-up questions and just answer.
-STOP_CONFIDENCE = 0.9
+# asking follow-up questions and just answer. Unmentioned symptoms count as
+# unknown, so confidence rarely reaches 0.9; at 0.6 the guess was right in every
+# case measured with three or more symptoms (docs/model_evaluation.md).
+STOP_CONFIDENCE = 0.6
 
 # A follow-up must be expected to cut uncertainty by at least this many nats
 # (see Predictor.next_symptoms), otherwise it is not worth asking.

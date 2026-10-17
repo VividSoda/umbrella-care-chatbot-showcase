@@ -20,7 +20,7 @@ def load():
 def pick_symptoms(patient_row, k, rng):
     """Pretend the patient only told us k of the symptoms they really have."""
     have = np.flatnonzero(patient_row)  # indexes of the symptoms the patient has
-    return set(rng.choice(have, size=min(k, len(have), replace=False)))
+    return set(rng.choice(have, size=min(k, len(have)), replace=False))
 
 
 def collect_results(X, y, k, method):

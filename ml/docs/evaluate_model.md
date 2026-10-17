@@ -296,7 +296,9 @@ def collect_results(X, y, k, method):
     results = []
     folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
     for train_rows, test_rows in folds.split(X, y):
-        sim = Sim(BernoulliNB().fit(X[train_rows], y[train_rows]))  # never saw the test patients
+        sim = Sim(
+            BernoulliNB().fit(X[train_rows], y[train_rows])
+        )  # never saw the test patients
         for i in test_rows:
             for attempt in range(TRIES):
                 rng = np.random.default_rng(i * 100 + attempt)
@@ -304,7 +306,9 @@ def collect_results(X, y, k, method):
                 if method == "current":
                     beliefs = sim.posterior_full(told)  # unmentioned = absent (today)
                 else:
-                    beliefs = sim.posterior_partial(told, set())  # unmentioned = unknown
+                    beliefs = sim.posterior_partial(
+                        told, set()
+                    )  # unmentioned = unknown
                 guess = sim.classes[beliefs.argmax()]
                 results.append((beliefs.max(), guess == y[i]))
     return np.array(results, dtype=float)
@@ -518,7 +522,9 @@ def print_threshold_table(results):
     for t in (0.2, 0.3, 0.4, 0.5, 0.6):
         answered = confidence >= t
         if answered.any():
-            print(f"{t:.1f}         {answered.mean():6.0%}      {right[answered].mean():10.0%}")
+            print(
+                f"{t:.1f}         {answered.mean():6.0%}      {right[answered].mean():10.0%}"
+            )
 ```
 
 ### Line by line

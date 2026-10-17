@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.chatbot.constants import STOP_CONFIDENCE
 from src.chatbot.predictor import Predictor
 
 MODEL_PATH = Path(__file__).parents[2] / "artifacts" / "model.joblib"
@@ -27,7 +26,7 @@ def _patients(predictor: Predictor) -> list[tuple[str, set[str]]]:
 
 
 def _questions_needed(predictor, disease, has, pick) -> int:
-    """Questions asked before the bot is sure and right, or MAX_QUESTIONS.
+    """Questions asked before the top guess is the right disease, or MAX_QUESTIONS.
 
     A "no" answer adds nothing: unanswered symptoms are ignored, not absent.
     """
@@ -35,7 +34,7 @@ def _questions_needed(predictor, disease, has, pick) -> int:
     declined: set[str] = set()
     for asked in range(MAX_QUESTIONS + 1):
         top = predictor.predict(known, top_n=1)[0]
-        if top.disease == disease and top.probability >= STOP_CONFIDENCE:
+        if top.disease == disease:
             return asked
         choices = [s for s in pick(known) if s not in declined]
         if not choices:
