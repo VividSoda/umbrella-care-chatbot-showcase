@@ -6,7 +6,6 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-import pandas as pd
 
 from src.chatbot.constants import TOP_N_DISEASES
 from src.chatbot.utils import entropy, softmax
@@ -57,13 +56,9 @@ class Predictor:
         if unknown:
             raise ValueError(f"Unknown symptoms: {sorted(unknown)}")
 
-        # The model was fitted on a DataFrame, so it expects named columns in
-        # training order; 1 marks a symptom the user has.
-        row = pd.DataFrame([[0] * len(self._symptoms)], columns=self._symptoms)
-        for symptom in symptoms:
-            row[symptom] = 1
-
-        probabilities = self._model.predict_proba(row)[0]
+        # Symptoms the user did not mention are unknown, not absent.
+        present_idx = [self._index[s] for s in symptoms]
+        probabilities = self._posterior(present_idx)
         best = np.argsort(probabilities)[::-1][:top_n]
         return [Prediction(self._labels[i], float(probabilities[i])) for i in best]
 
